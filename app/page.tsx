@@ -5,10 +5,8 @@ import { ExchangeMonitorContainer } from "./fetures/ExchangeMonitor/container/Ex
 
 export default function Home() {
   return (
-    <div id="root" className="min-h-screen bg-background font-sans antialiased">
-      <DateRangeProvider>
-        <ExchangeMonitorContainer />
-      </DateRangeProvider>
-    </div>
+    <DateRangeProvider>
+      <ExchangeMonitorContainer />
+    </DateRangeProvider>
   );
 }

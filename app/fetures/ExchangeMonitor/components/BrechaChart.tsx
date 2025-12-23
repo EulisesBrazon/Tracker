@@ -37,15 +37,15 @@ function CustomTooltip({ active, payload, label }: any) {
 export function BrechaChart({ data }: BrechaChartProps) {
   return (
     <Card>
-      <CardHeader className="pb-2">
-        <CardTitle className="text-base font-medium">
+      <CardHeader className="pb-2 px-3 sm:px-6 pt-4 sm:pt-6">
+        <CardTitle className="text-base font-medium text-center">
           Brecha Cambiaria (%)
         </CardTitle>
       </CardHeader>
-      <CardContent className="pt-0">
+      <CardContent className="pt-0 px-2 sm:px-6 pb-4 sm:pb-6">
         <div className="h-[200px] sm:h-[220px]">
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={data} syncId="exchangeSync" margin={{ top: 5, right: 10, left: -10, bottom: 5 }}>
+            <AreaChart data={data} syncId="exchangeSync" margin={{ top: 5, right: 5, left: -20, bottom: 5 }}>
               <defs>
                 <linearGradient id="brechaGradient" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor="hsl(25, 95%, 53%)" stopOpacity={0.4} />

@@ -18,7 +18,7 @@ export function StatsCard({ bcvStats, paraleloStats }: StatsCardProps) {
         </div>
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <p className="text-xs font-medium text-bcv mb-1">BCV</p>
+            <p className="text-xs font-medium text-bcv mb-1 text-left">BCV</p>
             <div className="space-y-1 text-xs">
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Promedio:</span>
@@ -35,7 +35,7 @@ export function StatsCard({ bcvStats, paraleloStats }: StatsCardProps) {
             </div>
           </div>
           <div>
-            <p className="text-xs font-medium text-paralelo mb-1">Paralelo</p>
+            <p className="text-xs font-medium text-paralelo mb-1 text-left">Paralelo</p>
             <div className="space-y-1 text-xs">
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Promedio:</span>

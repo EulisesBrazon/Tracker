@@ -42,15 +42,15 @@ function CustomTooltip({ active, payload, label }: any) {
 export function PriceChart({ data }: PriceChartProps) {
   return (
     <Card>
-      <CardHeader className="pb-2">
-        <CardTitle className="text-base font-medium">
+      <CardHeader className="pb-2 px-3 sm:px-6 pt-4 sm:pt-6">
+        <CardTitle className="text-base font-medium text-center">
           Comparación de Tasas
         </CardTitle>
       </CardHeader>
-      <CardContent className="pt-0">
+      <CardContent className="pt-0 px-2 sm:px-6 pb-4 sm:pb-6">
         <div className="h-[280px] sm:h-[320px]">
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={data} syncId="exchangeSync" margin={{ top: 5, right: 10, left: -10, bottom: 5 }}>
+            <LineChart data={data} syncId="exchangeSync" margin={{ top: 5, right: 5, left: -20, bottom: 5 }}>
               <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
               <XAxis
                 dataKey="fecha"
@@ -70,7 +70,8 @@ export function PriceChart({ data }: PriceChartProps) {
               />
               <Tooltip content={<CustomTooltip />} />
               <Legend
-                wrapperStyle={{ paddingTop: 10 }}
+                align="center"
+                wrapperStyle={{ paddingTop: 10, marginLeft: 10 }}
                 iconType="circle"
                 iconSize={8}
               />
