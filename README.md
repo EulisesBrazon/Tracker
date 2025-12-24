@@ -23,6 +23,7 @@ El proyecto se ha desarrollado bajo la filosofía de **Clean Code** y **Clean Ar
 * **Lenguaje**: TypeScript para un tipado robusto y seguro.
 * **Estilos**: Tailwind CSS con `tailwind-merge` para gestión de clases dinámicas.
 * **Componentes**: Estructura basada en **Feature Components** (ubicados en `src/features/`), donde cada funcionalidad es autosuficiente y contiene sus propios Hooks, Services, Components, Containers y Context.
+* **Node**: 24.12.0 (versión utilizada para desarrollo)
 
 ## Cómo ejecutar (rápido)
 
