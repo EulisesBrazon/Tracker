@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { RateModel } from '../models/rate';
+import { RateModel } from '../models';
 import { RateDoc, RateHistory } from '../types';
 
 const API_URL = process.env.DOLAR_API_URL || '';

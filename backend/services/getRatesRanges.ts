@@ -1,4 +1,4 @@
-import { RateModel } from '../models/rate';
+import { RateModel } from '../models';
 import { RateDoc } from '../types';
 
 export type QueryRatesOptions = {

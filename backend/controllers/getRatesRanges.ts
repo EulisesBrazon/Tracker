@@ -1,4 +1,4 @@
-import { queryRates } from '../services/getRatesRanges';
+import { queryRates } from '../services';
 
 export const getRatesRangesController = {
   async get(params: { from?: string; to?: string; source?: string | string[] }) {

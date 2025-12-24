@@ -1,4 +1,4 @@
-import { syncUsdtRate } from '../services/UsdtRateSync';
+import { syncUsdtRate } from '../services';
 
 export const UsdtRateSyncController = {
 	async get() {

@@ -1,4 +1,4 @@
-import { syncBcvRate } from '../services/BcvRateSync';
+import { syncBcvRate } from '../services';
 
 export const BcvRateSyncController = {
 	async get() {

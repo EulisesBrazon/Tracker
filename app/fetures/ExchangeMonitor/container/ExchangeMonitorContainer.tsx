@@ -3,7 +3,7 @@
 import { useDateRange } from '../context/DateRangeContext';
 import { useExchangeData } from '../hooks/useExchangeData';
 import { useState, useMemo } from 'react';
-import { HomeContainer } from '../../Home/containers';
+// HomeContainer is rendered at a higher level; don't import it here
 import { DateRangeFilter } from '../components/DateRangeFilter';
 import { BrechaModeSelector } from '../components/BrechaModeSelector';
 import { PriceCard } from '../components/PriceCard';
@@ -12,12 +12,15 @@ import { StatsCard } from '../components/StatsCard';
 import { PriceChart } from '../components/PriceChart';
 import { BrechaChart } from '../components/BrechaChart';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
+// auth handled at top-level provider
 
 export function ExchangeMonitorContainer() {
   const { dateRange } = useDateRange();
   const { chartData, stats, isLoading, error } = useExchangeData(dateRange);
   const [base, setBase] = useState<'bcv' | 'usdt'>('usdt');
   const [metric, setMetric] = useState<'brecha' | 'ratio'>('brecha');
+
+  // authentication UI is managed by the top-level AuthProvider
 
   // derive legacy mode string used by child components
   const brechaMode = useMemo(() => {
@@ -49,17 +52,15 @@ export function ExchangeMonitorContainer() {
 
   if (error) {
     return (
-      <HomeContainer>
-        <div className="flex items-center justify-center min-h-[60vh]">
-          <p className="text-destructive">{error}</p>
-        </div>
-      </HomeContainer>
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <p className="text-destructive">{error}</p>
+      </div>
     );
   }
 
   return (
-    <HomeContainer>
-      <div className="container mx-auto max-w-7xl px-2 sm:px-4 py-4 sm:py-6 space-y-4 sm:space-y-6">
+    <div className="container mx-auto max-w-7xl px-2 sm:px-4 py-4 sm:py-6 space-y-4 sm:space-y-6">
+        {/* Authentication handled by top-level provider */}
         {/* Filter + Selector: row on sm+, column on mobile */}
         <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
           <div className="w-full sm:w-auto flex justify-center">
@@ -109,7 +110,6 @@ export function ExchangeMonitorContainer() {
             </div>
           </>
         )}
-      </div>
-    </HomeContainer>
+        </div>
   );
 }
