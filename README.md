@@ -1,36 +1,41 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# VES Tracker 🚀
 
-## Getting Started
+## Descripción
+**VES Tracker** es un dashboard personal de monitoreo cambiario y análisis de brecha entre la tasa oficial del BCV y el mercado USDT/Paralelo en Venezuela. La aplicación proporciona una visualización clara y técnica de los datos financieros para facilitar el seguimiento del poder adquisitivo y la toma de decisiones económicas diarias.
 
-First, run the development server:
+## Captura de pantalla
+
+La siguiente imagen muestra la vista principal (Home) de la aplicación.
+
+![Captura del Home](public/Home.jpg)
+
+## Características Principales
+* **Análisis de Brecha**: Cálculo automático y visualización del diferencial porcentual entre tasas.
+* **Visualización Dinámica**: Gráficas interactivas desarrolladas con Recharts sincronizadas para análisis comparativo.
+* **Diseño Mobile First**: Interfaz optimizada para una experiencia fluida en dispositivos móviles.
+* **Modo Oscuro Nativo**: Soporte completo de temas claro y oscuro mediante Tailwind CSS.
+* **Persistencia de Datos**: Histórico detallado consumido desde base de datos propia.
+
+## Arquitectura y Stack Técnico
+El proyecto se ha desarrollado bajo la filosofía de **Clean Code** y **Clean Architecture**:
+
+* **Framework**: Next.js (App Router).
+* **Lenguaje**: TypeScript para un tipado robusto y seguro.
+* **Estilos**: Tailwind CSS con `tailwind-merge` para gestión de clases dinámicas.
+* **Componentes**: Estructura basada en **Feature Components** (ubicados en `src/features/`), donde cada funcionalidad es autosuficiente y contiene sus propios Hooks, Services, Components, Containers y Context.
+
+## Cómo ejecutar (rápido)
+
+1. Instalar dependencias:
+
+```bash
+npm install
+```
+
+2. Ejecutar en modo desarrollo:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
-
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+3. Abrir http://localhost:3000
