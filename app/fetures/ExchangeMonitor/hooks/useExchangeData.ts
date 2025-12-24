@@ -3,7 +3,10 @@ import { ExchangeRate, ExchangeDataPoint, ExchangeStats, DateRange } from '../ty
 import { fetchExchangeRates } from '../services/exchangeService';
 
 function calculateBrecha(bcv: number, paralelo: number): number {
-  return Number((((paralelo - bcv) / bcv) * 100).toFixed(2));
+  if (!paralelo || paralelo === 0) return 0;
+  const ratio = bcv / paralelo;
+  const brecha = 1 - ratio;
+  return Number((brecha * 100).toFixed(2));
 }
 
 function filterByDateRange(data: ExchangeRate[], range: DateRange): ExchangeRate[] {
@@ -11,6 +14,10 @@ function filterByDateRange(data: ExchangeRate[], range: DateRange): ExchangeRate
   let startDate: Date;
 
   switch (range) {
+    case 'today':
+      startDate = new Date(today);
+      startDate.setHours(0, 0, 0, 0);
+      break;
     case '7d':
       startDate = new Date(today);
       startDate.setDate(today.getDate() - 7);
@@ -21,6 +28,10 @@ function filterByDateRange(data: ExchangeRate[], range: DateRange): ExchangeRate
       break;
     case 'ytd':
       startDate = new Date(today.getFullYear(), 0, 1);
+      break;
+    default:
+      startDate = new Date(today);
+      startDate.setDate(today.getDate() - 7);
       break;
   }
 
@@ -33,21 +44,30 @@ export function useExchangeData(dateRange: DateRange) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    let active = true;
+
     async function loadData() {
       try {
         setIsLoading(true);
-        const data = await fetchExchangeRates();
+        const data = await fetchExchangeRates(dateRange);
+        if (!active) return;
         setRawData(data);
         setError(null);
       } catch (err) {
+        if (!active) return;
         setError('Error al cargar los datos');
       } finally {
+        if (!active) return;
         setIsLoading(false);
       }
     }
 
     loadData();
-  }, []);
+
+    return () => {
+      active = false;
+    };
+  }, [dateRange]);
 
   const filteredData = useMemo(() => {
     return filterByDateRange(rawData, dateRange);
@@ -56,7 +76,14 @@ export function useExchangeData(dateRange: DateRange) {
   const chartData: ExchangeDataPoint[] = useMemo(() => {
     return filteredData.map(item => ({
       ...item,
+      // brecha según fórmula (1 - bcv/paralelo) * 100 (brecha respecto al paralelo)
       brecha: calculateBrecha(item.bcv, item.paralelo),
+      // brecha respecto a la tasa oficial (BCV) -> (paralelo - bcv) / bcv * 100
+      brecha_official: item.bcv === 0 ? 0 : Number((((item.paralelo - item.bcv) / item.bcv) * 100).toFixed(2)),
+      // ratio directo paralelo / bcv
+      ratio: item.bcv === 0 ? 0 : Number((item.paralelo / item.bcv).toFixed(2)),
+      // ratio inverso bcv / paralelo
+      ratio_inv: item.paralelo === 0 ? 0 : Number((item.bcv / item.paralelo).toFixed(2)),
     }));
   }, [filteredData]);
 

@@ -5,7 +5,14 @@ export interface ExchangeRate {
 }
 
 export interface ExchangeDataPoint extends ExchangeRate {
+  // brecha calculada respecto a la tasa paralela (por defecto en UI antigua)
   brecha: number;
+  // brecha respecto a la tasa oficial (base BCV): (paralelo - bcv) / bcv * 100
+  brecha_official?: number;
+  // ratio directo: paralelo / bcv
+  ratio?: number;
+  // ratio inverso: bcv / paralelo
+  ratio_inv?: number;
 }
 
 export interface PriceIndicator {
@@ -34,4 +41,4 @@ export interface ExchangeStats {
   };
 }
 
-export type DateRange = '7d' | '30d' | 'ytd';
+export type DateRange = 'today' | '7d' | '30d' | 'ytd';

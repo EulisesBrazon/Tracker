@@ -16,7 +16,7 @@ export function HomeContainer({ children }: HomeContainerProps) {
             <Header />
 
             <main className="flex-1">
-                <div className="flex flex-col items-center gap-4 py-6">
+                {/* <div className="flex flex-col items-center gap-4 py-6">
                     <div className="flex flex-col sm:flex-row gap-4">
                         <button
                             className="px-4 py-2 rounded bg-bcv text-white font-semibold disabled:opacity-60"
@@ -46,7 +46,7 @@ export function HomeContainer({ children }: HomeContainerProps) {
                 </div>
                 <div className="container mx-auto max-w-3xl px-2 sm:px-4 mt-6">
                     <RatesQueryForm />
-                </div>
+                </div> */}
                 {children}
             </main>
 
