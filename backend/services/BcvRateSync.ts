@@ -2,11 +2,13 @@ import axios from 'axios';
 import { RateModel } from '../models/rate';
 import { RateDoc, RateHistory } from '../types';
 
-const API_URL = 'https://ve.dolarapi.com/v1/dolares/oficial';
+const API_URL = process.env.DOLAR_API_URL || '';
 
 export async function syncBcvRate() {
+	console.log('[Service] syncBcvRate llamada');
 	// 1. Consultar el endpoint externo
 	const { data } = await axios.get(API_URL);
+	console.log('[Service] Respuesta de dolarapi:', data);
 	const {
 		fuente,
 		nombre,
@@ -31,7 +33,7 @@ export async function syncBcvRate() {
 
 	if (rate) {
 		// Verificar si ya existe ese timestamp en el historial
-		const existe = rate.historial.some(h => h.timestamp === fechaActualizacion);
+		const existe = rate.historial.some((historialItem: RateHistory) => historialItem.timestamp === fechaActualizacion);
 		if (!existe) {
 			rate.historial.push(nuevoHist);
 			rate.ultimaActualizacion = fechaActualizacion;

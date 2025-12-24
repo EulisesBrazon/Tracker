@@ -1,4 +1,4 @@
-import { Schema, model, Document } from 'mongoose';
+import { Schema, model, models, Document } from 'mongoose';
 import { RateDoc, RateHistory } from '../types';
 
 interface RateDocMongoose extends RateDoc, Document {}
@@ -20,4 +20,4 @@ const RateSchema = new Schema<RateDocMongoose>({
 	historial: { type: [RateHistorySchema], default: [] },
 });
 
-export const RateModel = model<RateDocMongoose>('Rate', RateSchema);
+export const RateModel = models.Rate || model<RateDocMongoose>('Rate', RateSchema);
