@@ -20,7 +20,7 @@ export function LoginForm() {
   }
 
   return (
-    <div className="flex items-center justify-center min-h-[50vh]">
+    <div className="flex items-center justify-center min-h-[50vh] px-4 sm:px-0">
       <form onSubmit={handleSubmit} className="w-full max-w-sm p-4 rounded-lg border bg-card space-y-3">
         <h3 className="text-lg font-semibold">Iniciar sesión</h3>
         {error && <div className="text-red-500 text-sm">{error}</div>}
@@ -44,14 +44,16 @@ export function LoginForm() {
             className="w-full mt-1 px-3 py-2 rounded bg-background border border-border text-foreground"
           />
         </div>
-        <div className="flex items-center justify-between">
-          <button
-            type="submit"
-            className="px-4 py-2 rounded bg-primary text-white font-semibold disabled:opacity-60"
-            disabled={loading}
-          >
-            {loading ? 'Entrando...' : 'Entrar'}
-          </button>
+        <div className="flex items-center justify-center">
+          <div className="flex rounded-lg border border-border bg-muted/50 p-1">
+            <button
+              type="submit"
+              className="px-4 py-2 text-sm font-medium rounded-md bg-background text-foreground shadow-sm disabled:opacity-60"
+              disabled={loading}
+            >
+              {loading ? 'Entrando...' : 'Entrar'}
+            </button>
+          </div>
         </div>
       </form>
     </div>

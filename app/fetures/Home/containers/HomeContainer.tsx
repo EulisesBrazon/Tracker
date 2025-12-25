@@ -15,8 +15,14 @@ export function HomeContainer() {
         <div className="min-h-screen bg-background flex flex-col">
             <Header />
 
-            <main className="flex-1">
-                {!user ? <LoginContainer /> : <ExchangeMonitorContainer />}
+            <main className="flex-1 flex">
+                {!user ? (
+                    <div className="flex flex-1 items-center justify-center">
+                        <LoginContainer />
+                    </div>
+                ) : (
+                    <ExchangeMonitorContainer />
+                )}
             </main>
 
             <Footer />

@@ -12,7 +12,14 @@ export async function POST(req: NextRequest) {
     // Delegate authentication to the backend controller
     try {
       const result = await loginController.post({ username: String(email), password: String(password) });
-      return NextResponse.json(result);
+      // set httpOnly cookie with token if provided
+      const responseBody = { token: result.token, user: result.user };
+      const res = NextResponse.json(responseBody);
+      if (result.token) {
+        // maxAge in seconds for 30 days
+        res.cookies.set('token', result.token, { httpOnly: true, path: '/', maxAge: 60 * 60 * 24 * 30 });
+      }
+      return res;
     } catch (err: any) {
       const message = err instanceof Error ? err.message : 'Error de autenticación';
       const status = message === 'Usuario no encontrado' || message === 'Contraseña incorrecta' ? 401 : 400;

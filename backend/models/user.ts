@@ -9,6 +9,8 @@ const UserSchema = new Schema<UserDocMongoose>({
 	password: { type: String, required: true },
 	// email is optional — use a sparse unique index so multiple docs without email are allowed
 	email: { type: String, required: false, unique: true, sparse: true, index: true },
+	// role: defaults to 'user'
+	role: { type: String, required: true, default: 'user', enum: ['user', 'admin'] },
 });
 
 const UserModel = models.User || model<UserDocMongoose>('User', UserSchema);

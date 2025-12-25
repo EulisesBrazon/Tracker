@@ -13,15 +13,19 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<User>(() => {
-    if (typeof window === 'undefined') return null;
+  // Start with null on both server and client first render to avoid hydration mismatches.
+  const [user, setUser] = useState<User>(null);
+
+  // After mount, load user from localStorage so client initial render matches server HTML.
+  useEffect(() => {
     try {
       const s = localStorage.getItem('user');
-      return s ? JSON.parse(s) as User : null;
+      const parsed = s ? (JSON.parse(s) as User) : null;
+      setUser(parsed);
     } catch {
-      return null;
+      setUser(null);
     }
-  });
+  }, []);
 
   useEffect(() => {
     if (user) localStorage.setItem('user', JSON.stringify(user));
@@ -36,24 +40,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         body: JSON.stringify({ email, password }),
       });
 
-      const data = await res.json();
+      // parse response safely (handle empty or non-json responses in production)
+      let data: any = null;
+      try {
+        const text = await res.text();
+        data = text ? JSON.parse(text) : null;
+      } catch (err) {
+        return { ok: false, error: 'Respuesta inválida del servidor' };
+      }
+
       if (!res.ok) return { ok: false, error: data?.message || 'Error de autenticación' };
 
       // store token if returned
-      if (data.token) {
+      if (data?.token) {
         try {
           localStorage.setItem('token', data.token);
         } catch {}
       }
 
-      setUser(data.user ?? null);
-      return { ok: true, token: data.token };
+      setUser(data?.user ?? null);
+      return { ok: true, token: data?.token };
     } catch (err: any) {
       return { ok: false, error: err?.message ?? String(err) };
     }
   }
 
   function logout() {
+    try {
+      localStorage.removeItem('token');
+    } catch {}
     setUser(null);
   }
 

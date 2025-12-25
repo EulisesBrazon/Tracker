@@ -2,6 +2,7 @@ export type User = {
 	username: string;
 	password: string;
 	email?: string;
+	role?: 'user' | 'admin';
 };
 
 // Si necesitas un tipo para crear usuario sin password (por ejemplo, para registro)
