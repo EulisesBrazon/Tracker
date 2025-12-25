@@ -36,6 +36,7 @@ export async function syncBcvRate() {
 		const existe = rate.historial.some((historialItem: RateHistory) => historialItem.timestamp === fechaActualizacion);
 		if (!existe) {
 			rate.historial.push(nuevoHist);
+			rate.valorActual = promedio;
 			rate.ultimaActualizacion = fechaActualizacion;
 			rate.promedio = promedio;
 			await rate.save();

@@ -50,6 +50,7 @@ export async function syncUsdtRate() {
 			const existe = rate.historial.some((historialItem: RateHistory) => historialItem.timestamp === fechaActualizacion);
 			if (!existe) {
 				rate.historial.push(nuevoHist);
+				rate.valorActual = average;
 				rate.ultimaActualizacion = fechaActualizacion;
 				rate.promedio = average;
 				await rate.save();

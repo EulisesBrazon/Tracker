@@ -10,7 +10,7 @@ const RateHistorySchema = new Schema<RateHistory>({
 }, { _id: false });
 
 const RateSchema = new Schema<RateDocMongoose>({
-	fuenteId: { type: String, required: true, index: true, unique: true },
+	fuenteId: { type: String, required: true, index: true },
 	nombre: { type: String, required: true },
 	moneda: { type: String, required: true },
 	fechaDia: { type: String, required: true },
@@ -19,5 +19,8 @@ const RateSchema = new Schema<RateDocMongoose>({
 	promedio: { type: Number, required: true },
 	historial: { type: [RateHistorySchema], default: [] },
 });
+
+// Índice compuesto para garantizar un único registro por fuente y día
+RateSchema.index({ fuenteId: 1, fechaDia: 1 }, { unique: true });
 
 export const RateModel = models.Rate || model<RateDocMongoose>('Rate', RateSchema);

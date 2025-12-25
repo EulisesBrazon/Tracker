@@ -17,8 +17,11 @@ export function middleware(req: NextRequest) {
 
   const token = req.cookies.get('token')?.value;
 
-  // API requests: return 401 if missing
+  // API requests: return 401 if missing, except for /api/cron/sync
   if (pathname.startsWith('/api')) {
+    if (pathname === '/api/cron/sync') {
+      return NextResponse.next();
+    }
     if (!token) {
       return new NextResponse(JSON.stringify({ message: 'Unauthorized' }), { status: 401, headers: { 'content-type': 'application/json' } });
     }
