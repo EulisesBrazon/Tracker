@@ -25,7 +25,17 @@ export async function queryRates(opts: QueryRatesOptions) {
   const docs = await RateModel.find(filter).sort({ fechaDia: 1 }).lean();
 
   // Map to a clean response shape (omit historial)
-  const mapped = docs.map((d: any) => ({
+  type RateSummary = {
+    fuenteId: string;
+    nombre: string;
+    moneda: string;
+    fechaDia: string;
+    ultimaActualizacion: string;
+    valorActual: number;
+    promedio: number;
+  };
+
+  const mapped: RateSummary[] = docs.map((d: any) => ({
     fuenteId: d.fuenteId,
     nombre: d.nombre,
     moneda: d.moneda,
@@ -37,8 +47,8 @@ export async function queryRates(opts: QueryRatesOptions) {
 
   // Group by fuenteId
   const grouped = {
-    bcv: mapped.filter((r) => r.fuenteId === 'bcv_oficial'),
-    usdt: mapped.filter((r) => r.fuenteId === 'binance_usdt'),
+    bcv: mapped.filter((r: RateSummary) => r.fuenteId === 'bcv_oficial'),
+    usdt: mapped.filter((r: RateSummary) => r.fuenteId === 'binance_usdt'),
   };
 
   return grouped;
