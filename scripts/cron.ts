@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import cron from 'node-cron';
 import { connectToDatabase } from '../lib/mongodb';
-import { syncBcvRate, syncUsdtRate } from '../backend/services';
+import { syncBcvRateV2, syncUsdtRate } from '../backend/services';
 
 async function runSync(label: string, fn: () => Promise<any>) {
   try {
@@ -20,7 +20,7 @@ function scheduleJobs() {
   const options = { timezone: 'America/Caracas' } as const;
 
   cron.schedule(expression, async () => {
-    await runSync('BCV', syncBcvRate);
+    await runSync('BCV', syncBcvRateV2);
     await runSync('USDT', syncUsdtRate);
   }, options);
 
@@ -33,7 +33,7 @@ async function main() {
 
   // Ejecución inmediata opcional al iniciar para probar/registrar
   if (process.env.CRON_RUN_ON_START === 'true') {
-    await runSync('BCV', syncBcvRate);
+    await runSync('BCV', syncBcvRateV2);
     await runSync('USDT', syncUsdtRate);
   }
 }

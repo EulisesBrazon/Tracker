@@ -1,4 +1,4 @@
-import { Schema, model, models, Document } from 'mongoose';
+import mongoose, { Schema, model, Document } from 'mongoose';
 import { RateDoc, RateHistory } from '../types';
 
 interface RateDocMongoose extends RateDoc, Document {}
@@ -23,4 +23,4 @@ const RateSchema = new Schema<RateDocMongoose>({
 // Índice compuesto para garantizar un único registro por fuente y día
 RateSchema.index({ fuenteId: 1, fechaDia: 1 }, { unique: true });
 
-export const RateModel = models.Rate || model<RateDocMongoose>('Rate', RateSchema);
+export const RateModel = (mongoose.models && (mongoose.models as any).Rate) || model<RateDocMongoose>('Rate', RateSchema);

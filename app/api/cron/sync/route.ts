@@ -1,7 +1,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { connectToDatabase } from '@/lib/mongodb';
-import { BcvRateSyncController } from '@/backend/controllers/BcvRateSync';
+import { BcvRateSyncV2Controller } from '@/backend/controllers/BcvRateSync-V2';
 import { UsdtRateSyncController } from '@/backend/controllers/UsdtRateSync';
 
 export async function GET(req: NextRequest) {
@@ -13,7 +13,7 @@ export async function GET(req: NextRequest) {
   }
   try {
     await connectToDatabase();
-    const bcv = await BcvRateSyncController.get();
+    const bcv = await BcvRateSyncV2Controller.get();
     const usdt = await UsdtRateSyncController.get();
     return NextResponse.json({ bcv, usdt });
   } catch (error: any) {

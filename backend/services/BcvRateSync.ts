@@ -5,10 +5,8 @@ import { RateDoc, RateHistory } from '../types';
 const API_URL = process.env.DOLAR_API_URL || '';
 
 export async function syncBcvRate() {
-	console.log('[Service] syncBcvRate llamada');
 	// 1. Consultar el endpoint externo
 	const { data } = await axios.get(API_URL);
-	console.log('[Service] Respuesta de dolarapi:', data);
 	const {
 		fuente,
 		nombre,

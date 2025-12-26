@@ -1,5 +1,5 @@
 
-import { Schema, model, models, Document } from 'mongoose';
+import mongoose, { Schema, model, Document } from 'mongoose';
 import { User } from '../types';
 
 interface UserDocMongoose extends User, Document {}
@@ -13,6 +13,6 @@ const UserSchema = new Schema<UserDocMongoose>({
 	role: { type: String, required: true, default: 'user', enum: ['user', 'admin'] },
 });
 
-const UserModel = models.User || model<UserDocMongoose>('User', UserSchema);
+const UserModel = (mongoose.models && (mongoose.models as any).User) || model<UserDocMongoose>('User', UserSchema);
 
 export default UserModel;
