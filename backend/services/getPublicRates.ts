@@ -69,14 +69,16 @@ export async function getRatesForDate(fecha: string): Promise<PublicRateSnapshot
     throw new Error('Formato de fecha inválido. Se espera yyyy-mm-dd');
   }
 
-  const [bcv, paralelo] = await Promise.all([
+  const [bcv, bcvEuro, paralelo] = await Promise.all([
     findRateForDate(SOURCE_IDS.bcv, fecha),
+    findRateForDate(SOURCE_IDS.bcvEuro, fecha),
     findRateForDate(SOURCE_IDS.paralelo, fecha),
   ]);
 
   return {
     fechaSolicitada: fecha,
     bcv,
+    bcvEuro,
     paralelo,
     brechaPorcentual: calcularBrecha(bcv?.valor ?? null, paralelo?.valor ?? null),
   };
@@ -91,7 +93,7 @@ export async function getRatesForDate(fecha: string): Promise<PublicRateSnapshot
  */
 export async function getLatestRates(): Promise<PublicRateSnapshot> {
   const masReciente = (await RateModel.findOne({
-    fuenteId: { $in: [SOURCE_IDS.bcv, SOURCE_IDS.paralelo] },
+    fuenteId: { $in: [SOURCE_IDS.bcv, SOURCE_IDS.bcvEuro, SOURCE_IDS.paralelo] },
   })
     .sort({ fechaDia: -1 })
     .lean()) as { fechaDia: string } | null;
@@ -100,6 +102,7 @@ export async function getLatestRates(): Promise<PublicRateSnapshot> {
     return {
       fechaSolicitada: new Date().toISOString().slice(0, 10),
       bcv: null,
+      bcvEuro: null,
       paralelo: null,
       brechaPorcentual: null,
     };
