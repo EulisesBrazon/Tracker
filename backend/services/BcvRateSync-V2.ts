@@ -5,28 +5,16 @@ import { RateDoc, RateHistory } from '../types';
 
 const API_URL = process.env.DOLAR_API_URL || '';
 
-export async function syncBcvRate() {
-	// 1. Consultar el valor y fecha del dólar desde el BCV (webscraping)
-	const scraped = await scrapeBcvRateV2();
-	const fuente = 'BCV';
-	const nombre = 'Banco Central de Venezuela';
-
-	// Normalizar/convertir valor retornado por el helper
-	const precio = typeof scraped.valor === 'number' ? scraped.valor : Number(scraped.valor);
-	// usar la fecha publicada por el BCV como timestamp de la actualización
-	const fechaPublicada = scraped.fecha ?? new Date().toISOString();
-
-	// Derivar la fecha del día (yyyy-mm-dd) a partir de la fecha publicada
-	// Esto asegura que el registro se asocie al día que indica la fuente, no a la fecha del request
-	const fechaDia = new Date(fechaPublicada).toISOString().slice(0, 10);
-
-	const fuenteId = 'bcv_oficial';
-	const moneda = 'VES';
-
-	// Buscar si ya existe un rate para la fecha publicada
+async function upsertRate(
+	fuenteId: string,
+	nombre: string,
+	moneda: string,
+	precio: number,
+	fechaPublicada: string,
+	fechaDia: string
+) {
 	let rate = await RateModel.findOne({ fuenteId, fechaDia });
 
-	// Preparar el histórico a insertar si aplica
 	const nuevoHist: RateHistory = {
 		precio,
 		timestamp: fechaPublicada,
@@ -34,11 +22,8 @@ export async function syncBcvRate() {
 	};
 
 	if (rate) {
-		// Si el registro existe para esa fecha, comprobar si el valor actual difiere
 		const valorActualExistente = rate.valorActual;
 		if (valorActualExistente !== precio) {
-			// Añadir un nuevo entry al historial y actualizar el valorActual/ultimaActualizacion
-			// Evitar duplicados por timestamp exacto
 			const existeTimestamp = rate.historial.some((h: RateHistory) => h.timestamp === fechaPublicada);
 			if (!existeTimestamp) {
 				rate.historial.push(nuevoHist);
@@ -49,10 +34,8 @@ export async function syncBcvRate() {
 			await rate.save();
 			return { actualizado: true, creado: false, rate };
 		}
-		// Si el valor no cambió, no hacemos nada
 		return { actualizado: false, creado: false, rate };
 	} else {
-		// Crear nuevo registro para la fecha publicada
 		const nuevoRate: RateDoc = {
 			fuenteId,
 			nombre,
@@ -66,4 +49,46 @@ export async function syncBcvRate() {
 		const creado = await RateModel.create(nuevoRate);
 		return { actualizado: false, creado: true, rate: creado };
 	}
+}
+
+export async function syncBcvRate() {
+	// 1. Consultar el valor y fecha del dólar y euro desde el BCV (webscraping)
+	const scraped = await scrapeBcvRateV2();
+
+	// Usar la fecha publicada por el BCV como timestamp de la actualización
+	const fechaPublicada = scraped.fecha ?? new Date().toISOString();
+	const fechaDia = new Date(fechaPublicada).toISOString().slice(0, 10);
+
+	// 2. Guardar tasa oficial Dólar (USD)
+	const precioDolar = typeof (scraped as any).valorDolar === 'number' ? (scraped as any).valorDolar : Number(scraped.valor);
+	const resDolar = await upsertRate(
+		'bcv_oficial',
+		'Banco Central de Venezuela (USD)',
+		'VES',
+		precioDolar,
+		fechaPublicada,
+		fechaDia
+	);
+
+	// 3. Guardar tasa oficial Euro (EUR) si está disponible
+	let resEuro: any = null;
+	const precioEuro = (scraped as any).valorEuro;
+	if (typeof precioEuro === 'number' && precioEuro > 0) {
+		resEuro = await upsertRate(
+			'bcv_euro_oficial',
+			'Banco Central de Venezuela (EUR)',
+			'VES',
+			precioEuro,
+			fechaPublicada,
+			fechaDia
+		);
+	}
+
+	return {
+		actualizado: resDolar.actualizado || (resEuro?.actualizado ?? false),
+		creado: resDolar.creado || (resEuro?.creado ?? false),
+		dolar: resDolar.rate,
+		euro: resEuro?.rate ?? null,
+		rate: resDolar.rate, // compatibilidad hacia atrás
+	};
 }

@@ -15,8 +15,8 @@ async function runSync(label: string, fn: () => Promise<any>) {
 }
 
 function scheduleJobs() {
-  // Ejecutar a las 09:00, 13:00 y 18:00 hora de Venezuela (America/Caracas)
-  const expression = '0 9,13,18 * * *';
+  // Ejecutar a las 09:00, 13:00, 18:00 y 23:00 (11 PM) hora de Venezuela (America/Caracas)
+  const expression = '0 9,13,18,23 * * *';
   const options = { timezone: 'America/Caracas' } as const;
 
   cron.schedule(expression, async () => {
@@ -24,7 +24,7 @@ function scheduleJobs() {
     await runSync('USDT', syncUsdtRate);
   }, options);
 
-  console.log('[Cron] Programado: 09:00, 13:00, 18:00 America/Caracas');
+  console.log('[Cron] Programado: 09:00, 13:00, 18:00, 23:00 America/Caracas');
 }
 
 async function main() {

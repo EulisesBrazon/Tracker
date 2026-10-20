@@ -307,16 +307,25 @@ export async function scrapeBcvRateV2() {
 
     // --- Lógica de extracción ---
     const rawDolar = $('#dolar strong').text().trim();
+    const rawEuro = $('#euro strong').text().trim();
     if (!rawDolar) {
-      throw new Error('No se pudo localizar el elemento del precio en el HTML');
+      throw new Error('No se pudo localizar el elemento del precio del dólar en el HTML');
     }
 
     // Limpieza: quitamos puntos de miles y cambiamos coma por punto decimal
     const normalizedDolar = rawDolar.replace(/\./g, '').replace(',', '.');
+    const normalizedEuro = rawEuro ? rawEuro.replace(/\./g, '').replace(',', '.') : '';
     const dateValue = $('.pull-right.dinpro.center span.date-display-single').attr('content');
 
+    const valorDolar = parseFloat(normalizedDolar);
+    const valorEuro = normalizedEuro ? parseFloat(normalizedEuro) : 0;
+
     return {
-      valor: parseFloat(normalizedDolar),
+      valor: valorDolar,
+      valorDolar,
+      rawDolar,
+      valorEuro,
+      rawEuro,
       fecha: dateValue,
       fuente: 'Banco Central de Venezuela'
     };

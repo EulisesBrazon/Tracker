@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import { isValidApiToken } from '@/lib/api-token';
 
 // Protect routes: require token cookie. Exclude login route, public and _next.
 export function middleware(req: NextRequest) {
@@ -7,6 +8,19 @@ export function middleware(req: NextRequest) {
 
   // Allow Next internals and public files
   if (pathname.startsWith('/_next') || pathname.startsWith('/static') || pathname.startsWith('/favicon.ico') || pathname.startsWith('/public')) {
+    return NextResponse.next();
+  }
+
+  // Machine-to-machine API: authenticated with the x-api-token header instead
+  // of the session cookie. Rejected here so an unauthorized request never
+  // reaches the handler nor opens a database connection.
+  if (pathname.startsWith('/api/public')) {
+    if (!isValidApiToken(req)) {
+      return new NextResponse(JSON.stringify({ success: false, error: 'No autorizado' }), {
+        status: 401,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
     return NextResponse.next();
   }
 
