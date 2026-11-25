@@ -1,298 +1,426 @@
-
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 import https from 'https';
 import tls from 'tls';
-import { createHash, X509Certificate } from 'crypto';
-import { fetchPem, savePem } from '../services';
+import { X509Certificate } from 'crypto';
+import { fetchPem } from '../services/getPem';
+import { savePem } from '../services/UpdatePem';
 import { connectToDatabase } from '../../lib/mongodb';
 
-export async function scrapeBcvRateV2() {
-  const url = 'https://www.bcv.org.ve/';
+const BCV_URL = 'https://www.bcv.org.ve/';
+const PEM_KEY_NAME = 'bcv-cert';
+const PEM_BLOCK_REGEX = /-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g;
+const MAX_AIA_DEPTH = 4;
+const MAX_CERT_BYTES = 512 * 1024;
 
+const TLS_CERT_ERROR_CODES = new Set([
+  'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+  'UNABLE_TO_GET_ISSUER_CERT',
+  'UNABLE_TO_GET_ISSUER_CERT_LOCALLY',
+  'SELF_SIGNED_CERT_IN_CHAIN',
+  'DEPTH_ZERO_SELF_SIGNED_CERT',
+  'CERT_UNTRUSTED',
+  'CERT_HAS_EXPIRED',
+  'CERT_NOT_YET_VALID',
+  'ERR_TLS_CERT_ALTNAME_INVALID',
+  'EPROTO',
+]);
+
+export function derToPem(der: Buffer): string {
+  const b64 = der.toString('base64');
+  const lines = b64.match(/.{1,64}/g) || [];
+  return `-----BEGIN CERTIFICATE-----\n${lines.join('\n')}\n-----END CERTIFICATE-----\n`;
+}
+
+export function splitPemBlocks(pemText: string): string[] {
+  return (pemText.match(PEM_BLOCK_REGEX) || []).map((block) => block.trim() + '\n');
+}
+
+function addValidHttpUrl(candidate: string, target: Set<string>): void {
+  try {
+    const parsed = new URL(candidate);
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+      target.add(parsed.toString());
+    }
+  } catch {
+    // Ignore malformed URLs
+  }
+}
+
+/**
+ * Extracts Authority Information Access (AIA) CA Issuers URLs from a certificate.
+ * Uses OpenSSL's ASN.1 parser via `X509Certificate.infoAccess` first so binary DER
+ * extensions (such as CRL Distribution Points) can never corrupt extracted URLs.
+ * Falls back to strict printable-ASCII scanning only if `infoAccess` yields nothing.
+ */
+export function extractAiaIssuerUrls(certInput: Buffer | X509Certificate): string[] {
+  const urls = new Set<string>();
+
+  let parsedCert: X509Certificate | null = null;
+  if (certInput instanceof X509Certificate) {
+    parsedCert = certInput;
+  } else {
+    try {
+      parsedCert = new X509Certificate(certInput);
+    } catch {
+      parsedCert = null;
+    }
+  }
+
+  if (parsedCert?.infoAccess) {
+    const caIssuerMatches = parsedCert.infoAccess.matchAll(/CA Issuers\s*-\s*URI:\s*(https?:\/\/[^\s\r\n]+)/gi);
+    for (const match of caIssuerMatches) {
+      if (match[1]) addValidHttpUrl(match[1], urls);
+    }
+  }
+
+  if (urls.size > 0) {
+    return Array.from(urls);
+  }
+
+  const rawBuf = certInput instanceof X509Certificate ? certInput.raw : certInput;
+  const rawStr = rawBuf.toString('latin1');
+  const asciiChunks = rawStr.match(/[A-Za-z0-9._~:/?#[\]@!$&'()*+,;=%-]+/g) ?? [];
+  for (const chunk of asciiChunks) {
+    const subChunks = chunk.split(/(?=https?:\/\/)/i);
+    for (const sub of subChunks) {
+      const match = sub.match(/^https?:\/\/[A-Za-z0-9._~:/?#[\]@!$&'()*+,;=%-]+?\.(?:crt|cer|der|pem)/i);
+      if (match) addValidHttpUrl(match[0], urls);
+    }
+  }
+
+  return Array.from(urls);
+}
+
+/**
+ * Normalizes PEM blocks into a deduplicated bundle of valid, non-expired X.509 certificates.
+ */
+export function normalizePemBundle(pemSources: string[], now: Date = new Date()): string {
+  const nowMs = now.getTime();
+  const seenFingerprints = new Set<string>();
+  const normalizedBlocks: string[] = [];
+
+  for (const source of pemSources) {
+    for (const block of splitPemBlocks(source)) {
+      try {
+        const cert = new X509Certificate(block);
+        const validToMs = Date.parse(cert.validTo);
+        if (Number.isFinite(validToMs) && validToMs <= nowMs) {
+          continue;
+        }
+        if (!seenFingerprints.has(cert.fingerprint256)) {
+          seenFingerprints.add(cert.fingerprint256);
+          normalizedBlocks.push(block);
+        }
+      } catch {
+        // Ignore unparseable PEM blocks
+      }
+    }
+  }
+
+  return normalizedBlocks.join('\n');
+}
+
+function getFingerprints(pemText: string): Set<string> {
+  const fps = new Set<string>();
+  for (const block of splitPemBlocks(pemText)) {
+    try {
+      fps.add(new X509Certificate(block).fingerprint256);
+    } catch {
+      // Ignore unparseable blocks
+    }
+  }
+  return fps;
+}
+
+export function isTlsCertificateError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const err = error as { code?: unknown; message?: unknown };
+  if (typeof err.code === 'string' && TLS_CERT_ERROR_CODES.has(err.code)) {
+    return true;
+  }
+  if (typeof err.message === 'string') {
+    return /certificate|unable to verify|self[- ]signed|unable to get (local )?issuer/i.test(err.message);
+  }
+  return false;
+}
+
+function parseDownloadedCertificates(buf: Buffer): string[] {
+  const asUtf8 = buf.toString('utf8');
+  if (asUtf8.includes('-----BEGIN CERTIFICATE-----')) {
+    return splitPemBlocks(asUtf8);
+  }
+  if (buf.length > 50 && buf[0] === 0x30) {
+    return [derToPem(buf)];
+  }
+  return [];
+}
+
+async function fetchPeerChain(hostname: string, portNum: number): Promise<Array<{ pem: string; raw: Buffer }>> {
+  return new Promise((resolve, reject) => {
+    const socket = tls.connect(
+      { host: hostname, port: portNum, servername: hostname, rejectUnauthorized: false },
+      () => {
+        try {
+          const peer = socket.getPeerCertificate(true) as {
+            raw?: Buffer;
+            issuerCertificate?: unknown;
+          };
+          const items: Array<{ pem: string; raw: Buffer }> = [];
+          let current: { raw?: Buffer; issuerCertificate?: unknown } | undefined = peer;
+          const seen = new Set<string>();
+
+          while (current && Object.keys(current).length > 0) {
+            if (current.raw) {
+              const key = current.raw.toString('base64');
+              if (!seen.has(key)) {
+                const rawBuf = Buffer.from(current.raw);
+                items.push({ pem: derToPem(rawBuf), raw: rawBuf });
+                seen.add(key);
+              }
+            }
+            const next = current.issuerCertificate as
+              | { raw?: Buffer; issuerCertificate?: unknown }
+              | undefined;
+            if (!next || next === current) break;
+            current = next;
+          }
+
+          socket.end();
+          resolve(items);
+        } catch (err) {
+          socket.destroy();
+          reject(err);
+        }
+      }
+    );
+
+    socket.setTimeout(5000, () => {
+      socket.destroy();
+      reject(new Error('timeout fetching peer certificate chain'));
+    });
+
+    socket.on('error', (err) => {
+      reject(err);
+    });
+  });
+}
+
+function isIssuedByTrustedRoot(cert: X509Certificate, trustedRoots: X509Certificate[]): boolean {
+  return trustedRoots.some((root) => {
+    try {
+      return cert.checkIssued(root);
+    } catch {
+      return false;
+    }
+  });
+}
+
+async function downloadAiaIntermediates(seedCerts: Buffer[], defaultRootPems: string[]): Promise<string[]> {
+  const downloadedPems: string[] = [];
+  const visitedUrls = new Set<string>();
+  const seenFingerprints = new Set<string>();
+  const trustedRoots: X509Certificate[] = [];
+  for (const pem of defaultRootPems) {
+    try {
+      trustedRoots.push(new X509Certificate(pem));
+    } catch {
+      // Ignore unparseable system root entries
+    }
+  }
+
+  const queue: Array<{ raw: Buffer; depth: number }> = seedCerts.map((raw) => ({ raw, depth: 0 }));
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current || current.depth >= MAX_AIA_DEPTH) continue;
+
+    const aiaUrls = extractAiaIssuerUrls(current.raw);
+    for (const aiaUrl of aiaUrls) {
+      if (visitedUrls.has(aiaUrl)) continue;
+      visitedUrls.add(aiaUrl);
+
+      // Node's X509Certificate does not parse PKCS#7 bundles (.p7c/.p7b)
+      if (/\.p7[bc](?:$|[?#])/i.test(aiaUrl)) continue;
+
+      try {
+        const resp = await axios.get<ArrayBuffer>(aiaUrl, {
+          responseType: 'arraybuffer',
+          timeout: 5000,
+          maxContentLength: MAX_CERT_BYTES,
+        });
+        const buf = Buffer.from(resp.data);
+        const candidates = parseDownloadedCertificates(buf);
+        if (candidates.length === 0) {
+          console.warn('[scrapeBcvRateV2] El recurso AIA descargado no parece un certificado válido:', aiaUrl);
+          continue;
+        }
+
+        for (const pem of candidates) {
+          try {
+            const cert = new X509Certificate(pem);
+            if (seenFingerprints.has(cert.fingerprint256)) continue;
+            seenFingerprints.add(cert.fingerprint256);
+            downloadedPems.push(pem);
+
+            if (cert.subject !== cert.issuer && !isIssuedByTrustedRoot(cert, trustedRoots)) {
+              queue.push({ raw: cert.raw, depth: current.depth + 1 });
+            }
+          } catch (certErr) {
+            const message = certErr instanceof Error ? certErr.message : String(certErr);
+            console.warn('[scrapeBcvRateV2] Certificado AIA inválido descargado desde', aiaUrl, message);
+          }
+        }
+      } catch (dlErr) {
+        const message = dlErr instanceof Error ? dlErr.message : String(dlErr);
+        console.warn('[scrapeBcvRateV2] Falló al descargar intermedio AIA:', aiaUrl, message);
+      }
+    }
+  }
+
+  return downloadedPems;
+}
+
+async function persistPemIfChanged(pemSources: string[], existingPem: string): Promise<void> {
+  const newPem = normalizePemBundle(pemSources);
+  if (!newPem) return;
+
+  const existingFps = getFingerprints(existingPem);
+  const newFps = getFingerprints(newPem);
+  const unchanged =
+    existingFps.size === newFps.size && Array.from(newFps).every((fp) => existingFps.has(fp));
+
+  if (!unchanged) {
+    await savePem(PEM_KEY_NAME, newPem);
+  }
+}
+
+async function fetchBcvHtml(url: string, options: https.AgentOptions): Promise<string> {
+  const agent = new https.Agent({ ...options, keepAlive: false });
+  try {
+    const resp = await axios.get<string>(url, {
+      httpsAgent: agent,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36',
+        Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'es-ES,es;q=0.8,en-US;q=0.5,en;q=0.3',
+      },
+      timeout: 10000,
+    });
+    return resp.data;
+  } finally {
+    agent.destroy();
+  }
+}
+
+export async function scrapeBcvRateV2() {
   try {
     try {
       await connectToDatabase();
-      // console.log('[scrapeBcvRateV2] connectToDatabase(): conexión iniciada');
     } catch (connErr) {
-      console.warn('[scrapeBcvRateV2] connectToDatabase() falló (continuando):', (connErr as any)?.message || connErr);
+      const message = connErr instanceof Error ? connErr.message : String(connErr);
+      console.warn('[scrapeBcvRateV2] connectToDatabase() falló (continuando):', message);
     }
-    // Obtener PEM únicamente desde la base de datos (sin fallback a fichero)
-    // Nota: es posible que inicialmente no exista registro en la BD; no fallamos inmediatamente
-    let bcvCert: Buffer | undefined = undefined;
-    let certSource = 'db';
+
+    let existingPem = '';
     try {
-      const dbPem = await fetchPem('bcv-cert');
-      if (!dbPem || !dbPem.pem) {
-        // console.log('[scrapeBcvRateV2] No existe PEM en DB (bcv-cert). Se continuará intentando obtener la cadena desde el servidor.');
-      } else {
-        // console.log('[scrapeBcvRateV2] Loaded PEM from DB (bcv-cert)');
-        bcvCert = Buffer.from(dbPem.pem, 'utf8');
+      const dbPem = await fetchPem(PEM_KEY_NAME);
+      if (dbPem?.pem) {
+        existingPem = dbPem.pem;
       }
     } catch (dbErr) {
-      console.error('[scrapeBcvRateV2] Error cargando PEM desde la BD:', (dbErr as any)?.message || dbErr);
-      // console.log('[scrapeBcvRateV2] Continuando sin PEM local en DB; se intentará recuperar intermediarios desde el servidor.');
+      const message = dbErr instanceof Error ? dbErr.message : String(dbErr);
+      console.error('[scrapeBcvRateV2] Error cargando PEM desde la BD:', message);
     }
 
-    // Logueamos información útil del certificado para diagnóstico
-    try {
-      if (bcvCert) {
-        const fingerprint = createHash('sha256').update(bcvCert).digest('hex');
-        // console.log(`[scrapeBcvRateV2] Cert loaded (${certSource}) (sha256=${fingerprint}, bytes=${bcvCert.length})`);
-      } else {
-        // console.log('[scrapeBcvRateV2] No hay certificado local cargado desde DB; procediendo sin fingerprint local.');
-      }
-    } catch (logErr) {
-      console.warn('[scrapeBcvRateV2] No se pudo generar fingerprint del certificado:', (logErr as any)?.message || logErr);
-    }
-
-    // Creamos el agente combinando los root CAs por defecto de Node con tu certificado
     const defaultRoots: string[] = Array.from(tls.rootCertificates || []);
-    // console.log(`[scrapeBcvRateV2] Default root CAs count: ${defaultRoots.length}`);
-    const pemString = bcvCert ? bcvCert.toString('utf8') : '';
+    const dbCertBlocks = splitPemBlocks(normalizePemBundle(existingPem ? [existingPem] : []));
 
-    // Helper: convierte un buffer DER a PEM
-    const derToPem = (der: Buffer) => {
-      const b64 = der.toString('base64');
-      const lines = b64.match(/.{1,64}/g) || [];
-      return `-----BEGIN CERTIFICATE-----\n${lines.join('\n')}\n-----END CERTIFICATE-----\n`;
-    };
-
-    // Intenta recuperar la cadena de certificados del servidor (leaf + intermedios)
-    const parsedUrl = new URL(url);
-    const host = parsedUrl.hostname;
-    const port = parsedUrl.port ? parseInt(parsedUrl.port, 10) : 443;
-
-    const fetchPeerChain = async (hostname: string, portNum: number) => {
-      return new Promise<Array<{ pem: string; raw: Buffer }>>((resolve, reject) => {
-        const socket = tls.connect({ host: hostname, port: portNum, servername: hostname, rejectUnauthorized: false }, () => {
-          try {
-            const peer = socket.getPeerCertificate(true) as any;
-            const items: Array<{ pem: string; raw: Buffer }> = [];
-            // `peer` may be an object with `raw` buffer and an `issuerCertificate` chain
-            let current: any = peer;
-            const seen = new Set<string>();
-            while (current && Object.keys(current).length) {
-              if (current.raw && !seen.has(current.raw.toString('base64'))) {
-                const rawBuf = Buffer.from(current.raw);
-                items.push({ pem: derToPem(rawBuf), raw: rawBuf });
-                seen.add(current.raw.toString('base64'));
-              }
-              if (!current.issuerCertificate || current.issuerCertificate === current) break;
-              current = current.issuerCertificate;
-            }
-            socket.end();
-            resolve(items);
-          } catch (err) {
-            socket.destroy();
-            reject(err);
-          }
-        });
-        socket.setTimeout(5000, () => {
-          socket.destroy();
-          reject(new Error('timeout fetching peer certificate chain'));
-        });
-        socket.on('error', (err) => {
-          reject(err);
-        });
-      });
-    };
-
-    let peerChainPems: string[] = [];
-    let combinedCa: string[] = [];
-    try {
-      const fetched = await fetchPeerChain(host, port);
-      // fetched[0] is the leaf; any server-provided intermediates follow
-      const serverProvidedPems = fetched.map(f => f.pem);
-      peerChainPems = serverProvidedPems.slice(1); // skip leaf
-      // Attempt to auto-download intermediates from AIA URLs found in the leaf's raw DER
-      const downloadedIntermediates: string[] = [];
-      try {
-        const leafRaw = fetched[0]?.raw;
-        if (leafRaw) {
-          const rawStr = leafRaw.toString('latin1');
-            // capture common certificate file URLs only to avoid grabbing surrounding garbage
-            const urlMatches = Array.from(new Set(Array.from(rawStr.matchAll(/https?:\/\/[^\s\0<>"']+\.(?:crt|cer|der|pem)/ig)).map(m => m[0])));
-          if (urlMatches.length) {
-            // console.log(`[scrapeBcvRateV2] AIA URLs found in leaf cert: ${urlMatches.join(', ')}`);
-            for (const u of urlMatches) {
-              try {
-                // console.log(`[scrapeBcvRateV2] Downloading possible intermediate from ${u}`);
-                const resp = await axios.get(u, { responseType: 'arraybuffer', timeout: 5000 });
-                const buf = Buffer.from(resp.data);
-                // Heuristics: if UTF-8 text contains PEM header, use as-is; if size looks like DER (starts with 0x30), convert
-                const asUtf8 = buf.toString('utf8');
-                if (asUtf8.includes('-----BEGIN CERTIFICATE-----')) {
-                  downloadedIntermediates.push(asUtf8);
-                } else if (buf.length > 50 && buf[0] === 0x30) {
-                  downloadedIntermediates.push(derToPem(buf));
-                } else {
-                  console.warn('[scrapeBcvRateV2] downloaded resource did not look like a cert, skipping');
-                }
-                // console.log(`[scrapeBcvRateV2] Downloaded intermediate from ${u} (${buf.length} bytes)`);
-              } catch (dlErr) {
-                console.warn('[scrapeBcvRateV2] fallo al descargar intermediate:', u, (dlErr as any)?.message || dlErr);
-              }
-            }
-            if (downloadedIntermediates.length) {
-              // console.log(`[scrapeBcvRateV2] Downloaded intermediates count: ${downloadedIntermediates.length}`);
-            }
-          } else {
-            // console.log('[scrapeBcvRateV2] No AIA URLs found in leaf raw DER');
-          }
-        }
-      } catch (aiaErr) {
-        console.warn('[scrapeBcvRateV2] Error extracting/downloading AIA intermediates:', (aiaErr as any)?.message || aiaErr);
-      }
-      // combined CA: system roots, server-provided intermediates, downloaded intermediates, local PEM (si existe)
-      combinedCa = [...defaultRoots, ...peerChainPems, ...(Array.isArray(downloadedIntermediates) ? downloadedIntermediates : [])];
-      if (pemString) combinedCa.push(pemString);
-      // console.log(`[scrapeBcvRateV2] Fetched peer chain certificates count: ${peerChainPems.length}`);
-      // Log details for each fetched certificate
-      try {
-        peerChainPems.forEach((pem, i) => {
-          try {
-            const cert = new X509Certificate(pem);
-            // console.log(`[scrapeBcvRateV2] Peer cert #${i}: subject=${cert.subject}, issuer=${cert.issuer}, serial=${cert.serialNumber}, validFrom=${cert.validFrom}, validTo=${cert.validTo}, fingerprint256=${cert.fingerprint256}`);
-          } catch (cErr) {
-            console.warn('[scrapeBcvRateV2] No se pudo parsear peer cert:', (cErr as any)?.message || cErr);
-          }
-        });
-      } catch (logChainErr) {
-        console.warn('[scrapeBcvRateV2] Error loggeando la cadena de certificados:', (logChainErr as any)?.message || logChainErr);
-      }
-      // Peer chain fetched count logged above; not writing files to project per policy
-      // console.log(`[scrapeBcvRateV2] Peer chain fetched count: ${peerChainPems.length}`);
-      // Log info about local BCV cert file
-      try {
-        if (pemString) {
-          const localCert = new X509Certificate(pemString);
-          // console.log(`[scrapeBcvRateV2] Local BCV cert: subject=${localCert.subject}, issuer=${localCert.issuer}, serial=${localCert.serialNumber}, validFrom=${localCert.validFrom}, validTo=${localCert.validTo}, fingerprint256=${localCert.fingerprint256}`);
-          } else {
-          // console.log('[scrapeBcvRateV2] No hay certificado local para parsear (pemString vacío)');
-        }
-      } catch (localErr) {
-        console.warn('[scrapeBcvRateV2] No se pudo parsear el certificado local bcv-cert.pem:', (localErr as any)?.message || localErr);
-      }
-      // Test a TLS connection using the combined CA to inspect authorization
-      try {
-        await new Promise<void>((resolve, reject) => {
-          const testSocket = tls.connect({ host, port, servername: host, ca: combinedCa, rejectUnauthorized: true }, () => {
-            // console.log(`[scrapeBcvRateV2] TLS test connection: authorized=${(testSocket as any).authorized}, authorizationError=${(testSocket as any).authorizationError}`);
-            testSocket.end();
-            resolve();
-          });
-          testSocket.setTimeout(5000, () => {
-            testSocket.destroy();
-            reject(new Error('timeout during TLS test connection'));
-          });
-          testSocket.on('error', (err) => reject(err));
-        });
-      } catch (tlsTestErr) {
-        console.warn('[scrapeBcvRateV2] TLS test with combined CA failed:', (tlsTestErr as any)?.message || tlsTestErr);
-      }
-      // If TLS test succeeded (authorized=true) or we've downloaded intermediates, persist updated PEM to DB
-      try {
-        const storeIntermediates = [...peerChainPems, ...(Array.isArray(downloadedIntermediates) ? downloadedIntermediates : [])];
-        if (storeIntermediates.length) {
-          // Recolectar todos los bloques PEM candidatos (intermediates + local)
-          const candidateText = storeIntermediates.join('\n') + '\n' + pemString;
-          const pemBlockRegex = /-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g;
-          const allBlocks = Array.from(new Set((candidateText.match(pemBlockRegex) || []).map(b => b.trim())));
-
-          // Normalizar y deduplicar por fingerprint (mantener primer orden de aparición)
-          const seen = new Set<string>();
-          const normalizedBlocks: string[] = [];
-          for (const blk of allBlocks) {
-            try {
-              const cert = new X509Certificate(blk);
-              const fp = cert.fingerprint256;
-              if (!seen.has(fp)) {
-                seen.add(fp);
-                normalizedBlocks.push(blk + '\n');
-              }
-            } catch (pErr) {
-              // Ignorar bloques que no se puedan parsear
-            }
-          }
-
-          if (normalizedBlocks.length === 0) {
-            // console.log('[scrapeBcvRateV2] No se encontraron bloques PEM válidos para guardar en DB');
-          } else {
-            const newPem = normalizedBlocks.join('\n');
-            try {
-              const existing = await fetchPem('bcv-cert');
-              const existingBlocks = (existing && existing.pem) ? (existing.pem.match(pemBlockRegex) || []).map(b => b.trim()) : [];
-              // comparar fingerprints de existing vs new
-              const existingFps = new Set<string>();
-              for (const eb of existingBlocks) {
-                try { existingFps.add(new X509Certificate(eb).fingerprint256); } catch { }
-              }
-              const newFps = new Set<string>();
-              for (const nb of normalizedBlocks) {
-                try { newFps.add(new X509Certificate(nb).fingerprint256); } catch { }
-              }
-              const same = existingFps.size === newFps.size && Array.from(newFps).every(f => existingFps.has(f));
-              if (!same) {
-                await savePem('bcv-cert', newPem);
-                // console.log('[scrapeBcvRateV2] Replaced PEM in DB (bcv-cert) with normalized unique blocks');
-              } else {
-                // console.log('[scrapeBcvRateV2] PEM en DB ya contiene los mismos certificados; no se actualiza');
-              }
-            } catch (innerErr) {
-              console.warn('[scrapeBcvRateV2] Error comparando/guardando PEM en DB:', (innerErr as any)?.message || innerErr);
-            }
-          }
-        }
-      } catch (upErr) {
-        console.warn('[scrapeBcvRateV2] Failed to prepare PEM for saving into DB:', (upErr as any)?.message || upErr);
-      }
-    } catch (chainErr) {
-      console.warn('[scrapeBcvRateV2] No se pudo obtener la cadena de certificados del servidor:', (chainErr as any)?.message || chainErr);
-    }
-
-    // Orden: system roots, fetched intermediates, provided BCV cert (ensure trusted anchors present)
-    // (combinedCa already declared above)
-
-    // Intentos de conexión TLS con distintos trust stores / fallback
     let html: string | undefined;
-    let lastErr: any = null;
+    let lastErr: unknown = null;
 
-    const doRequest = async (agent: https.Agent) => {
-      const resp = await axios.get(url, {
-        httpsAgent: agent,
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-          'Accept-Language': 'es-ES,es;q=0.8,en-US;q=0.5,en;q=0.3',
-        },
-        timeout: 10000
-      });
-      return resp.data;
-    };
-
-    // 1) Intento: combinación de root CA del sistema + PEM proporcionado
+    // 1) Fast path: system roots + cached intermediate certificates from DB
     try {
-      const agent1 = new https.Agent({ ca: combinedCa, rejectUnauthorized: true, keepAlive: true });
-      html = await doRequest(agent1);
+      html = await fetchBcvHtml(BCV_URL, {
+        ca: [...defaultRoots, ...dbCertBlocks],
+        rejectUnauthorized: true,
+      });
     } catch (e1) {
       lastErr = e1;
-      console.warn('[scrapeBcvRateV2] Intento 1 (combined CA) falló:', (e1 as any)?.code || (e1 as any)?.message || e1);
+      const errCode = (e1 as { code?: string; message?: string })?.code || (e1 instanceof Error ? e1.message : String(e1));
+      console.warn('[scrapeBcvRateV2] Intento 1 (system roots + DB PEM) falló:', errCode);
 
-      // 2) Intento: sólo root CA del sistema (sin PEM personalizado)
-      try {
-        const agent2 = new https.Agent({ ca: defaultRoots, rejectUnauthorized: true, keepAlive: true });
-        html = await doRequest(agent2);
-        // console.log('[scrapeBcvRateV2] Intento 2 (system root CAs) tuvo éxito');
-      } catch (e2) {
-        lastErr = e2;
-        console.warn('[scrapeBcvRateV2] Intento 2 (system root CAs) falló:', (e2 as any)?.code || (e2 as any)?.message || e2);
+      // 2) On TLS/certificate error, fetch the live peer chain and download missing AIA intermediates
+      if (isTlsCertificateError(e1)) {
+        try {
+          const parsedUrl = new URL(BCV_URL);
+          const host = parsedUrl.hostname;
+          const port = parsedUrl.port ? parseInt(parsedUrl.port, 10) : 443;
 
-        // 3) Fallback inseguro opcional (solo si se habilita explícitamente mediante variable de entorno)
+          const fetched = await fetchPeerChain(host, port);
+          const peerIntermediates = fetched.slice(1).map((item) => item.pem);
+          const downloadedIntermediates = await downloadAiaIntermediates(
+            fetched.map((item) => item.raw),
+            defaultRoots
+          );
+          const freshIntermediates = [...peerIntermediates, ...downloadedIntermediates];
+
+          if (freshIntermediates.length > 0) {
+            try {
+              html = await fetchBcvHtml(BCV_URL, {
+                ca: [...defaultRoots, ...freshIntermediates],
+                rejectUnauthorized: true,
+              });
+              try {
+                await persistPemIfChanged(freshIntermediates, existingPem);
+              } catch (saveErr) {
+                const msg = saveErr instanceof Error ? saveErr.message : String(saveErr);
+                console.warn('[scrapeBcvRateV2] Error guardando PEM actualizado en DB:', msg);
+              }
+            } catch (eFresh) {
+              lastErr = eFresh;
+              if (dbCertBlocks.length > 0) {
+                html = await fetchBcvHtml(BCV_URL, {
+                  ca: [...defaultRoots, ...freshIntermediates, ...dbCertBlocks],
+                  rejectUnauthorized: true,
+                });
+                try {
+                  await persistPemIfChanged([...freshIntermediates, ...dbCertBlocks], existingPem);
+                } catch (saveErr) {
+                  const msg = saveErr instanceof Error ? saveErr.message : String(saveErr);
+                  console.warn('[scrapeBcvRateV2] Error guardando PEM combinado en DB:', msg);
+                }
+              } else {
+                throw eFresh;
+              }
+            }
+          }
+        } catch (chainErr) {
+          lastErr = chainErr;
+          const msg = chainErr instanceof Error ? chainErr.message : String(chainErr);
+          console.warn('[scrapeBcvRateV2] Falló la recuperación automática de cadena TLS/AIA:', msg);
+        }
+      }
+
+      // 3) Fallback: system root CAs only (in case cached DB PEM caused a conflict)
+      if (!html && dbCertBlocks.length > 0) {
+        try {
+          html = await fetchBcvHtml(BCV_URL, {
+            ca: defaultRoots,
+            rejectUnauthorized: true,
+          });
+        } catch (e3) {
+          lastErr = e3;
+          const code = (e3 as { code?: string; message?: string })?.code || (e3 instanceof Error ? e3.message : String(e3));
+          console.warn('[scrapeBcvRateV2] Intento 3 (system root CAs) falló:', code);
+        }
+      }
+
+      // 4) Optional explicit insecure fallback (only if enabled via env var)
+      if (!html) {
         if (process.env.BCV_ALLOW_INSECURE === '1') {
           console.warn('[scrapeBcvRateV2] BCV_ALLOW_INSECURE=1 -> intentando petición insegura (rejectUnauthorized=false)');
-          const agent3 = new https.Agent({ rejectUnauthorized: false, keepAlive: true });
-          html = await doRequest(agent3);
+          html = await fetchBcvHtml(BCV_URL, { rejectUnauthorized: false });
         } else {
           throw lastErr;
         }
@@ -318,7 +446,12 @@ export async function scrapeBcvRateV2() {
     const dateValue = $('.pull-right.dinpro.center span.date-display-single').attr('content');
 
     const valorDolar = parseFloat(normalizedDolar);
-    const valorEuro = normalizedEuro ? parseFloat(normalizedEuro) : 0;
+    if (!Number.isFinite(valorDolar) || valorDolar <= 0) {
+      throw new Error(`Valor del dólar inválido extraído del BCV: "${rawDolar}"`);
+    }
+
+    const parsedEuro = normalizedEuro ? parseFloat(normalizedEuro) : 0;
+    const valorEuro = Number.isFinite(parsedEuro) && parsedEuro > 0 ? parsedEuro : 0;
 
     return {
       valor: valorDolar,
@@ -327,14 +460,12 @@ export async function scrapeBcvRateV2() {
       valorEuro,
       rawEuro,
       fecha: dateValue,
-      fuente: 'Banco Central de Venezuela'
+      fuente: 'Banco Central de Venezuela',
     };
-
   } catch (error) {
-    const err = error as any;
-    // Si el error es de certificado, lo indicamos específicamente
+    const err = error as { code?: string; message?: string };
     if (err.code === 'EPROTO' || err.code === 'CERT_HAS_EXPIRED') {
-      console.error('Error de certificado: Revisa si el archivo .pem es correcto o ha expirado.');
+      console.error('Error de certificado: Revisa si el certificado almacenado es correcto o ha expirado.');
     }
     console.error('Error detallado:', err.code || err.message || err);
     throw new Error(`Error conectando al BCV: ${err.message || err}`);
